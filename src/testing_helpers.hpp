@@ -17,6 +17,17 @@ int cmpArrays(int n, T *a, T *b) {
     return 0;
 }
 
+template<typename T>
+int cmpArraysThree(int n, T* a, T* b, T* c) {
+    for (int i = 0; i < n; i++) {
+        if (a[i] != b[i]) {
+            printf("    a[%d] = %d, b[%d] = %d, orig[%d] = %d\n", i, a[i], i, b[i], i, c[i]);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void printDesc(const char *desc) {
     printf("==== %s ====\n", desc);
 }
@@ -25,6 +36,12 @@ template<typename T>
 void printCmpResult(int n, T *a, T *b) {
     printf("    %s \n",
             cmpArrays(n, a, b) ? "FAIL VALUE" : "passed");
+}
+
+template<typename T>
+void printCmpResultThree(int n, T* a, T* b, T* c) {
+    printf("    %s \n",
+        cmpArraysThree(n, a, b, c) ? "FAIL VALUE" : "passed");
 }
 
 template<typename T>

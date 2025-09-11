@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
     StreamCompaction::Naive::scan(SIZE, c, a);
     printElapsedTime(StreamCompaction::Naive::timer().getGpuElapsedTimeForPreviousOperation(), "(CUDA Measured)");
     //printArray(SIZE, c, true);
-    printCmpResult(SIZE, b, c);
+    printCmpResultThree(SIZE, b, c, a);
 
     /* For bug-finding only: Array of 1s to help find bugs in stream compaction or scan
     onesArray(SIZE, c);
@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
     StreamCompaction::Naive::scan(NPOT, c, a);
     printElapsedTime(StreamCompaction::Naive::timer().getGpuElapsedTimeForPreviousOperation(), "(CUDA Measured)");
     //printArray(SIZE, c, true);
-    printCmpResult(NPOT, b, c);
+    printCmpResultThree(NPOT, b, c, a);
 
     zeroArray(SIZE, c);
     printDesc("work-efficient scan, power-of-two");

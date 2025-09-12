@@ -12,12 +12,91 @@ namespace StreamCompaction {
             return timer;
         }
 
+        __global__ void kernEffScan(int* g_odata, int* g_idata, int n) {
+            extern __shared__ int temp[];
+            int thid = threadIdx.x;
+            int offset = 1;
+            temp[2 * thid] = g_idata[2 * thid];
+            temp[2 * thid + 1] = g_idata[2 * thid + 1];
+
+            for (int d = n >> 1; d > 0; d = d >> 1) {
+                __syncthreads();
+                if (thid < d) {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+
+                    temp[bi] += temp[ai];
+                }
+                offset *= 2;
+            }
+
+            if (thid == 0) {
+                temp[n - 1] = 0;
+            }
+
+            for (int d = 1; d < n; d *= 2) {
+                offset = offset >> 1;
+                __syncthreads();
+                if (thid < d) {
+                    int ai = offset * (2 * thid + 1) - 1;
+                    int bi = offset * (2 * thid + 2) - 1;
+
+                    int t = temp[ai];
+                    temp[ai] = temp[bi];
+                    temp[bi] += t;
+                }
+            }
+
+            __syncthreads();
+
+            g_odata[2 * thid] = temp[2 * thid];
+            g_odata[2 * thid + 1] = temp[2 * thid + 1];
+        }
+
+        int nextPowerOf2(int n) {
+            n--;
+            n |= n >> 1;
+            n |= n >> 2;
+            n |= n >> 4;
+            n |= n >> 8;
+            n |= n >> 16;
+            n++;
+            return n;
+        }
+
+
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
          */
         void scan(int n, int *odata, const int *idata) {
             timer().startGpuTimer();
             // TODO
+            int paddedSize = nextPowerOf2(n);
+
+            int* d_idata;
+            int* d_odata;
+            cudaMalloc((void**)&d_idata, paddedSize * sizeof(int));
+            cudaMalloc((void**)&d_odata, paddedSize * sizeof(int));
+
+            cudaMemset(d_idata, 0, paddedSize * sizeof(int));
+            cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+            cudaDeviceSynchronize();
+
+            int numThreads = paddedSize / 2;
+
+            if (paddedSize <= 2048) {
+                kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize);
+            }
+            else {
+
+            }
+
+			cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
+			cudaDeviceSynchronize();
+
+			cudaFree(d_idata);
+			cudaFree(d_odata);
+
             timer().endGpuTimer();
         }
 

@@ -81,16 +81,16 @@ namespace StreamCompaction {
                 kernNaiveScan << <fullBlocksPerGrid, blockSize >> > (n, ilog2ceil(n), d_odata, d_idata, nullptr);
             } else {
 // Toggle between Multiple kernal launches and block number kernel launches
-#define MUL 0
+#define MUL 1
 
-#if MUL         // Multiple kernel launches, faster
+#if MUL         // Multiple kernel launches, kernel launched for O(log n) times, each executes in O(1)
                 for (int d = 1; d <= ilog2ceil(n); d++) {
                     kernNaiveScanIteration << <fullBlocksPerGrid, blockSize >> > (n, d, d_odata, d_idata);
                     std::swap(d_idata, d_odata); // Swap pointers
                 }
 
 
-#else           // Block number kernel launches, slower
+#else           // Block number kernel launches from slides, kernel launched for O(n) times, each executes in O(1)
                 const int m = n % blockSize == 0 ? n / blockSize : n / blockSize + 1;
                 int* d_iblockSums;
                 cudaMalloc((void**)&d_iblockSums, m * sizeof(int));

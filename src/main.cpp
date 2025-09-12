@@ -21,7 +21,9 @@ int *c = new int[SIZE];
 
 int main(int argc, char* argv[]) {
     // Scan tests
-
+    printf("****************\n");
+    printf("*** SIZE %d ***\n", SIZE);
+    printf("****************\n");
     printf("\n");
     printf("****************\n");
     printf("** SCAN TESTS **\n");

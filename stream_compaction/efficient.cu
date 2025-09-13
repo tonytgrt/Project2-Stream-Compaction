@@ -12,7 +12,7 @@ namespace StreamCompaction {
             return timer;
         }
 
-        __global__ void kernEffScan(int* g_odata, int* g_idata, int n) {
+        __global__ void kernEffScan(int* g_odata, int* g_idata, int n, int* blockSum) {
             extern __shared__ int temp[];
             int thid = threadIdx.x;
             int offset = 1;
@@ -31,6 +31,9 @@ namespace StreamCompaction {
             }
 
             if (thid == 0) {
+                if (blockSum) {
+                    blockSum[0] = temp[n - 1];  // Save total sum of this block
+                }
                 temp[n - 1] = 0;
             }
 
@@ -49,8 +52,34 @@ namespace StreamCompaction {
 
             __syncthreads();
 
-            g_odata[2 * thid] = temp[2 * thid];
-            g_odata[2 * thid + 1] = temp[2 * thid + 1];
+            if (!blockSum) { 
+                // exclusive scan
+                g_odata[2 * thid] = temp[2 * thid];
+                g_odata[2 * thid + 1] = temp[2 * thid + 1];
+            }
+            else {
+				// inclusive scan
+                g_odata[2 * thid] = temp[2 * thid + 1];
+                g_odata[2 * thid + 1] = temp[2 * thid + 2];
+                if (thid == 0) {
+                    g_odata[n - 1] = blockSum[0];
+				}
+            }
+            
+        }
+
+
+        __global__ void kernAddBlockSums(int n, int* odata, int blockSum) {
+            int index = threadIdx.x;
+
+            odata[2 * index] += blockSum;
+            odata[2 * index + 1] += blockSum;
+        }
+
+        __global__ void kernShiftRight(int n, int* odata, const int* idata) {
+            int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+            if (index >= n) return;
+            odata[index] = (index == 0) ? 0 : idata[index - 1];
         }
 
         int nextPowerOf2(int n) {
@@ -83,12 +112,43 @@ namespace StreamCompaction {
             cudaDeviceSynchronize();
 
             int numThreads = paddedSize / 2;
+			
 
             if (paddedSize <= 2048) {
-                kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize);
-            }
-            else {
+                kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
+            } else {
+                dim3 numBlocks((paddedSize + 1023) / 1024);
+                const int m = paddedSize / 2048;
+                int* d_iblockSums;
+                cudaMalloc((void**)&d_iblockSums, m * sizeof(int));
 
+                for (int i = 0; i < n; i += 2048) {
+					kernEffScan << <1, 1024, 2048 * sizeof(int) >> > (d_odata + i, d_idata + i, 2048, d_iblockSums + i / 2048);
+                }
+
+				int* blockSums = new int[m];
+				cudaMemcpy(blockSums, d_iblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
+                int a = blockSums[1];
+
+				int* d_oblockSums;
+				cudaMalloc((void**)&d_oblockSums, m * sizeof(int));
+
+				kernEffScan << <1, m / 2, m * sizeof(int) >> > (d_oblockSums, d_iblockSums, m, nullptr);
+
+                int* blockSums1 = new int[m];
+                cudaMemcpy(blockSums1, d_oblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
+                int a1 = blockSums1[1];
+                a1 = blockSums1[2];
+
+                for (int i = 0; i < n; i += 2048) {
+					kernAddBlockSums << <1, 1024 >> > (2048, d_odata + i, blockSums1[i / 2048]);
+                }
+                
+                cudaMemcpy(d_idata, d_odata, paddedSize * sizeof(int), cudaMemcpyDeviceToDevice);
+				kernShiftRight << <numBlocks, 1024 >> > (paddedSize, d_odata, d_idata);
+
+				cudaFree(d_iblockSums);
+				cudaFree(d_oblockSums);
             }
 
 			cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
@@ -117,10 +177,41 @@ namespace StreamCompaction {
             int numThreads = paddedSize / 2;
 
             if (paddedSize <= 2048) {
-                kernEffScan << <1, numThreads, n * sizeof(int) >> > (d_odata, d_idata, paddedSize);
+                kernEffScan << <1, numThreads, n * sizeof(int) >> > (d_odata, d_idata, paddedSize, nullptr);
             }
             else {
+                dim3 numBlocks((paddedSize + 1023) / 1024);
+                const int m = paddedSize / 2048;
+                int* d_iblockSums;
+                cudaMalloc((void**)&d_iblockSums, m * sizeof(int));
 
+                for (int i = 0; i < n; i += 2048) {
+                    kernEffScan << <1, 1024, 2048 * sizeof(int) >> > (d_odata + i, d_idata + i, 2048, d_iblockSums + i / 2048);
+                }
+
+                int* blockSums = new int[m];
+                cudaMemcpy(blockSums, d_iblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
+                int a = blockSums[1];
+
+                int* d_oblockSums;
+                cudaMalloc((void**)&d_oblockSums, m * sizeof(int));
+
+                kernEffScan << <1, m / 2, m * sizeof(int) >> > (d_oblockSums, d_iblockSums, m, nullptr);
+
+                int* blockSums1 = new int[m];
+                cudaMemcpy(blockSums1, d_oblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
+                int a1 = blockSums1[1];
+                a1 = blockSums1[2];
+
+                for (int i = 0; i < n; i += 2048) {
+                    kernAddBlockSums << <1, 1024 >> > (2048, d_odata + i, blockSums1[i / 2048]);
+                }
+
+                cudaMemcpy(d_idata, d_odata, paddedSize * sizeof(int), cudaMemcpyDeviceToDevice);
+                kernShiftRight << <numBlocks, 1024 >> > (paddedSize, d_odata, d_idata);
+
+                cudaFree(d_iblockSums);
+                cudaFree(d_oblockSums);
             }
 
             cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);

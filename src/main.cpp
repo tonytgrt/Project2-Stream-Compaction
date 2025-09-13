@@ -13,17 +13,44 @@
 #include <stream_compaction/thrust.h>
 #include "testing_helpers.hpp"
 
-const int SIZE = 1 << 8; // feel free to change the size of array
+ 
+const int selectedDevice = 1; // Hardcode GPU selection
+const int SIZE = 1 << 20; // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
 int *b = new int[SIZE];
 int *c = new int[SIZE];
 
 int main(int argc, char* argv[]) {
+    // Query available GPUs
+    int deviceCount = 1;
+    cudaGetDeviceCount(&deviceCount);
+
+    if (deviceCount == 0) {
+        std::cerr << "No CUDA-capable devices found!" << std::endl;
+        return -1;
+    }
+
+    std::cout << "Found " << deviceCount << " CUDA device(s):" << std::endl;
+
+    // Display information about each GPU
+    for (int i = 0; i < deviceCount; i++) {
+        cudaDeviceProp deviceProp;
+        cudaGetDeviceProperties(&deviceProp, i);
+        std::cout << "Device " << i << ": " << deviceProp.name << std::endl;
+        std::cout << "  Compute capability: " << deviceProp.major << "." << deviceProp.minor << std::endl;
+        std::cout << "  Total memory: " << (deviceProp.totalGlobalMem / 1024 / 1024) << " MB" << std::endl;
+        std::cout << "  SM count: " << deviceProp.multiProcessorCount << std::endl;
+    }
+
+    
+
+    // Set the device
+    cudaSetDevice(selectedDevice);
+    std::cout << "\nUsing device " << selectedDevice << ", Array Size n = " << SIZE << std::endl;
+    std::cout << "===============================================\n" << std::endl;
+
     // Scan tests
-    printf("****************\n");
-    printf("*** SIZE %d ***\n", SIZE);
-    printf("****************\n");
     printf("\n");
     printf("****************\n");
     printf("** SCAN TESTS **\n");

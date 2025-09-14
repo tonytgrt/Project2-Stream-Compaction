@@ -117,6 +117,7 @@ namespace StreamCompaction {
             if (paddedSize <= 2048) {
                 kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
             } else {
+#if 0
                 dim3 numBlocks((paddedSize + 1023) / 1024);
                 const int m = paddedSize / 2048;
                 int* d_iblockSums;
@@ -149,6 +150,7 @@ namespace StreamCompaction {
 
 				cudaFree(d_iblockSums);
 				cudaFree(d_oblockSums);
+#endif
             }
 
 			cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);

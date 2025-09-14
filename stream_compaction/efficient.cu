@@ -93,6 +93,38 @@ namespace StreamCompaction {
             return n;
         }
 
+        __global__ void kernUpSweep(int n, int* data, int level) {
+			int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+			int stride = 1 << (level + 1);
+			int ai = stride * (index + 1) - 1;
+
+            if (ai < n) {
+                int bi = ai - (1 << level);
+                data[ai] += data[bi];
+			}
+        }
+
+		__global__ void kernDownSweep(int n, int* data, int level) {
+			int index = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+			int stride = 1 << (level + 1);
+			int ai = stride * (index + 1) - 1;
+
+			if (ai < n) {
+				int bi = ai - (1 << level);
+				int t = data[bi];
+				data[bi] = data[ai];
+				data[ai] += t;
+			}
+		}
+
+        __global__ void kernSetLastZero(int n, int* data) {
+            if (threadIdx.x == 0 && blockIdx.x == 0) {
+                data[n - 1] = 0;
+            }
+		}
+
+#define MUL 1
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
@@ -109,15 +141,35 @@ namespace StreamCompaction {
 
             cudaMemset(d_idata, 0, paddedSize * sizeof(int));
             cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-            cudaDeviceSynchronize();
-
+            
+			const int blockSize = 1024;
             int numThreads = paddedSize / 2;
 			
 
             if (paddedSize <= 2048) {
                 kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
+                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
             } else {
-#if 0
+#if MUL
+				int depth = ilog2ceil(paddedSize);
+
+                for (int level = 0; level < depth; level++) {
+					int numActiveThreads = paddedSize / (1 << (level + 1));
+					dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
+					kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                }
+
+				kernSetLastZero << <1, 1 >> > (paddedSize, d_idata);
+
+                for (int level = depth - 1; level >= 0; level--) {
+                    int numActiveThreads = paddedSize / (1 << (level + 1));
+                    dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
+                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+				}
+
+                cudaMemcpy(odata, d_idata, n * sizeof(int), cudaMemcpyDeviceToHost);
+
+#else
                 dim3 numBlocks((paddedSize + 1023) / 1024);
                 const int m = paddedSize / 2048;
                 int* d_iblockSums;
@@ -150,11 +202,12 @@ namespace StreamCompaction {
 
 				cudaFree(d_iblockSums);
 				cudaFree(d_oblockSums);
+
+                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
 #endif
             }
 
-			cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
-			cudaDeviceSynchronize();
+			
 
 			cudaFree(d_idata);
 			cudaFree(d_odata);
@@ -176,12 +229,36 @@ namespace StreamCompaction {
             cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
             cudaDeviceSynchronize();
 
+			const int blockSize = 1024;
             int numThreads = paddedSize / 2;
 
             if (paddedSize <= 2048) {
                 kernEffScan << <1, numThreads, n * sizeof(int) >> > (d_odata, d_idata, paddedSize, nullptr);
+                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
             }
             else {
+#if MUL
+                int depth = ilog2ceil(paddedSize);
+
+                // Up-sweep phase
+                for (int level = 0; level < depth; level++) {
+                    int numActiveThreads = paddedSize / (1 << (level + 1));
+                    dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
+                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                }
+
+                // Set last element to 0
+                kernSetLastZero << <1, 1 >> > (paddedSize, d_idata);
+
+                // Down-sweep phase
+                for (int level = depth - 1; level >= 0; level--) {
+                    int numActiveThreads = paddedSize / (1 << (level + 1));
+                    dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
+                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                }
+
+                cudaMemcpy(d_odata, d_idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+#else
                 dim3 numBlocks((paddedSize + 1023) / 1024);
                 const int m = paddedSize / 2048;
                 int* d_iblockSums;
@@ -214,9 +291,11 @@ namespace StreamCompaction {
 
                 cudaFree(d_iblockSums);
                 cudaFree(d_oblockSums);
+                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+#endif
             }
 
-            cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+            
             cudaDeviceSynchronize();
 
             cudaFree(d_idata);

@@ -252,7 +252,7 @@ namespace StreamCompaction {
                 int* d_data;
                 cudaMalloc((void**)&d_data, paddedSize * sizeof(int));
                 cudaMemset(d_data, 0, paddedSize * sizeof(int));
-                cudaMemcpy(d_data, d_idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+                cudaMemcpy(d_data, idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
 
                 // For large arrays, use multiple kernel launches
                 int depth = ilog2ceil(paddedSize);
@@ -275,7 +275,7 @@ namespace StreamCompaction {
                 }
 
                 // Copy to output
-                cudaMemcpy(d_odata, d_data, n * sizeof(int), cudaMemcpyDeviceToDevice);
+                cudaMemcpy(odata, d_data, n * sizeof(int), cudaMemcpyDeviceToDevice);
                 cudaFree(d_data);
 #else
                 dim3 numBlocks((paddedSize + 1023) / 1024);

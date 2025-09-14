@@ -151,23 +151,34 @@ namespace StreamCompaction {
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
             } else {
 #if MUL
-				int depth = ilog2ceil(paddedSize);
+                int* d_data;
+                cudaMalloc((void**)&d_data, paddedSize * sizeof(int));
+                cudaMemset(d_data, 0, paddedSize * sizeof(int));
+                cudaMemcpy(d_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
 
+                // For large arrays, use multiple kernel launches
+                int depth = ilog2ceil(paddedSize);
+
+                // Up-sweep phase
                 for (int level = 0; level < depth; level++) {
-					int numActiveThreads = paddedSize / (1 << (level + 1));
-					dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-					kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                    int numActiveThreads = paddedSize / (1 << (level + 1));
+                    dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
+                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
                 }
 
-				kernSetLastZero << <1, 1 >> > (paddedSize, d_idata);
+                // Set last element to 0 for exclusive scan
+                kernSetLastZero << <1, 1 >> > (paddedSize, d_data);
 
+                // Down-sweep phase
                 for (int level = depth - 1; level >= 0; level--) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
-				}
+                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
+                }
 
-                cudaMemcpy(odata, d_idata, n * sizeof(int), cudaMemcpyDeviceToHost);
+                // Copy result from device to host
+                cudaMemcpy(odata, d_data, n * sizeof(int), cudaMemcpyDeviceToHost);
+                cudaFree(d_data);
 
 #else
                 dim3 numBlocks((paddedSize + 1023) / 1024);
@@ -238,26 +249,34 @@ namespace StreamCompaction {
             }
             else {
 #if MUL
+                int* d_data;
+                cudaMalloc((void**)&d_data, paddedSize * sizeof(int));
+                cudaMemset(d_data, 0, paddedSize * sizeof(int));
+                cudaMemcpy(d_data, d_idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+
+                // For large arrays, use multiple kernel launches
                 int depth = ilog2ceil(paddedSize);
 
                 // Up-sweep phase
                 for (int level = 0; level < depth; level++) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
                 }
 
                 // Set last element to 0
-                kernSetLastZero << <1, 1 >> > (paddedSize, d_idata);
+                kernSetLastZero << <1, 1 >> > (paddedSize, d_data);
 
                 // Down-sweep phase
                 for (int level = depth - 1; level >= 0; level--) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_idata, level);
+                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
                 }
 
-                cudaMemcpy(d_odata, d_idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+                // Copy to output
+                cudaMemcpy(d_odata, d_data, n * sizeof(int), cudaMemcpyDeviceToDevice);
+                cudaFree(d_data);
 #else
                 dim3 numBlocks((paddedSize + 1023) / 1024);
                 const int m = paddedSize / 2048;

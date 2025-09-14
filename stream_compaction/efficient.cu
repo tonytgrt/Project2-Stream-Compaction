@@ -118,11 +118,6 @@ namespace StreamCompaction {
 			}
 		}
 
-        __global__ void kernSetLastZero(int n, int* data) {
-            if (threadIdx.x == 0 && blockIdx.x == 0) {
-                data[n - 1] = 0;
-            }
-		}
 
 #define MUL 1
 
@@ -141,43 +136,72 @@ namespace StreamCompaction {
 
             cudaMemset(d_idata, 0, paddedSize * sizeof(int));
             cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+
             
 			const int blockSize = 1024;
             int numThreads = paddedSize / 2;
 			
 
             if (paddedSize <= 2048) {
+                
                 kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
+
             } else {
 #if MUL
                 int* d_data;
-                cudaMalloc((void**)&d_data, paddedSize * sizeof(int));
-                cudaMemset(d_data, 0, paddedSize * sizeof(int));
-                cudaMemcpy(d_data, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+
+				size_t bytes = paddedSize * sizeof(int);
+
+                cudaMalloc((void**)&d_data, bytes);
+
+                // Check for allocation failure
+                cudaError_t err = cudaGetLastError();
+                if (err != cudaSuccess) {
+                    printf("CUDA malloc failed: %s\n", cudaGetErrorString(err));
+                    timer().endGpuTimer();
+                    return;
+                }
+
+                cudaMemset(d_data, 0, bytes);
+                cudaMemcpy(d_data, idata, bytes, cudaMemcpyHostToDevice);
 
                 // For large arrays, use multiple kernel launches
                 int depth = ilog2ceil(paddedSize);
+
+                int* a = new int[0];
 
                 // Up-sweep phase
                 for (int level = 0; level < depth; level++) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
+                    int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
+                    kernUpSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
+					cudaDeviceSynchronize();
+                    cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
                 }
 
+                cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
+
+
                 // Set last element to 0 for exclusive scan
-                kernSetLastZero << <1, 1 >> > (paddedSize, d_data);
+                cudaMemset(d_data + paddedSize - 1, 0, sizeof(int));
+
+                cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
 
                 // Down-sweep phase
                 for (int level = depth - 1; level >= 0; level--) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
+                    int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
+                    kernDownSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
+                    cudaDeviceSynchronize();
+                    cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
                 }
 
+
                 // Copy result from device to host
-                cudaMemcpy(odata, d_data, n * sizeof(int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(odata, d_data, bytes, cudaMemcpyDeviceToHost);
                 cudaFree(d_data);
 
 #else
@@ -218,10 +242,8 @@ namespace StreamCompaction {
 #endif
             }
 
-			
-
-			cudaFree(d_idata);
-			cudaFree(d_odata);
+            cudaFree(d_idata);
+            cudaFree(d_odata);
 
             timer().endGpuTimer();
         }
@@ -261,17 +283,19 @@ namespace StreamCompaction {
                 for (int level = 0; level < depth; level++) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernUpSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
+                    int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
+                    kernUpSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
                 }
 
                 // Set last element to 0
-                kernSetLastZero << <1, 1 >> > (paddedSize, d_data);
+                cudaMemset(d_data + paddedSize - 1, 0, sizeof(int));
 
                 // Down-sweep phase
                 for (int level = depth - 1; level >= 0; level--) {
                     int numActiveThreads = paddedSize / (1 << (level + 1));
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
-                    kernDownSweep << <numBlocks, blockSize >> > (paddedSize, d_data, level);
+                    int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
+                    kernDownSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
                 }
 
                 // Copy to output

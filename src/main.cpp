@@ -14,8 +14,8 @@
 #include "testing_helpers.hpp"
 
  
-const int selectedDevice = 0; // Hardcode GPU selection
-const int SIZE = 1 << 21; // feel free to change the size of array
+const int selectedDevice = 1; // Hardcode GPU selection
+const int SIZE = 1 << 22; // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
 int *b = new int[SIZE];
@@ -187,7 +187,7 @@ int main(int argc, char* argv[]) {
     // Header
     printf("Size,CPU_Scan,Naive_Scan,Efficient_Scan,Thrust_Scan,CPU_Compact,Efficient_Compact\n");
 
-    for (int power = 8; power <= 12; power++) {
+    for (int power = 20; power <= 19; power++) {
         int testSize = 1 << power;
 
         int* testA = new int[testSize];

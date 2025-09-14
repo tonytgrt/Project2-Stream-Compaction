@@ -15,7 +15,7 @@
 
  
 const int selectedDevice = 1; // Hardcode GPU selection
-const int SIZE = 1 << 20; // feel free to change the size of array
+const int SIZE = 1 << 24; // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
 int *b = new int[SIZE];
@@ -175,6 +175,61 @@ int main(int argc, char* argv[]) {
     printElapsedTime(StreamCompaction::Efficient::timer().getGpuElapsedTimeForPreviousOperation(), "(CUDA Measured)");
     //printArray(count, c, true);
     printCmpLenResult(count, expectedNPOT, b, c);
+
+    // ========================================
+    // CSV OUTPUT FOR PERFORMANCE GRAPHING
+    // ========================================
+
+    printf("\n\n========================================\n");
+    printf("CSV Performance Data (for graphing)\n");
+    printf("========================================\n\n");
+
+    // Header
+    printf("Size,CPU_Scan,Naive_Scan,Efficient_Scan,Thrust_Scan,CPU_Compact,Efficient_Compact\n");
+
+    for (int power = 8; power <= 22; power++) {
+        int testSize = 1 << power;
+
+        int* testA = new int[testSize];
+        int* testB = new int[testSize];
+        int* testC = new int[testSize];
+
+        // Scan performance
+        genArray(testSize - 1, testA, 50);
+        testA[testSize - 1] = 0;
+
+        StreamCompaction::CPU::scan(testSize, testB, testA);
+        float t1 = StreamCompaction::CPU::timer().getCpuElapsedTimeForPreviousOperation();
+
+        StreamCompaction::Naive::scan(testSize, testC, testA);
+        float t2 = StreamCompaction::Naive::timer().getGpuElapsedTimeForPreviousOperation();
+
+        StreamCompaction::Efficient::scan(testSize, testC, testA);
+        float t3 = StreamCompaction::Efficient::timer().getGpuElapsedTimeForPreviousOperation();
+
+        StreamCompaction::Thrust::scan(testSize, testC, testA);
+        float t4 = StreamCompaction::Thrust::timer().getGpuElapsedTimeForPreviousOperation();
+
+        // Compaction performance
+        genArray(testSize - 1, testA, 4);
+        testA[testSize - 1] = 0;
+
+        StreamCompaction::CPU::compactWithoutScan(testSize, testB, testA);
+        float t5 = StreamCompaction::CPU::timer().getCpuElapsedTimeForPreviousOperation();
+
+        StreamCompaction::Efficient::compact(testSize, testC, testA);
+        float t6 = StreamCompaction::Efficient::timer().getGpuElapsedTimeForPreviousOperation();
+
+        printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+            testSize, t1, t2, t3, t4, t5, t6);
+
+        delete[] testA;
+        delete[] testB;
+        delete[] testC;
+    }
+
+    printf("\nCopy the CSV data above to create performance graphs\n");
+    printf("========================================\n\n");
 
     system("pause"); // stop Win32 console from closing on exit
     delete[] a;

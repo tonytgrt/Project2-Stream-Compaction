@@ -83,7 +83,7 @@ namespace StreamCompaction {
                 kernNaiveScan << <fullBlocksPerGrid, blockSize >> > (n, ilog2ceil(n), d_odata, d_idata, nullptr);
             } else {
 // Toggle between Multiple kernal launches and block number kernel launches
-#define MUL 0
+#define MUL 1
 
 #if MUL         // Multiple kernel launches, kernel launched for O(log n) times, each executes in O(1)
                 for (int d = 1; d <= ilog2ceil(n); d++) {

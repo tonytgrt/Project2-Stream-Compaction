@@ -75,7 +75,7 @@ namespace StreamCompaction {
 			cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
 			cudaDeviceSynchronize();
 
-			int blockSize = 1024;
+			int blockSize = 256;
 			dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);  
 
 
@@ -89,10 +89,7 @@ namespace StreamCompaction {
             }
 
             kernNaiveScanShift << <fullBlocksPerGrid, blockSize >> > (n, d_odata, d_idata);
-
-			cudaDeviceSynchronize();
 			cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
-
 
 			cudaFree(d_idata);
 			cudaFree(d_odata);

@@ -135,24 +135,24 @@ namespace StreamCompaction {
             timer().startGpuTimer();
             // TODO
             int paddedSize = nextPowerOf2(n);
-
-            int* d_idata;
-            int* d_odata;
-            cudaMalloc((void**)&d_idata, paddedSize * sizeof(int));
-            cudaMalloc((void**)&d_odata, paddedSize * sizeof(int));
-
-            cudaMemset(d_idata, 0, paddedSize * sizeof(int));
-            cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
-
-            
-			const int blockSize = 1024;
-            int numThreads = paddedSize / 2;
-			
+			const int blockSize = 256;
 
             if (paddedSize <= 2 * blockSize) {
-                
+                int* d_idata;
+                int* d_odata;
+                cudaMalloc((void**)&d_idata, paddedSize * sizeof(int));
+                cudaMalloc((void**)&d_odata, paddedSize * sizeof(int));
+
+                cudaMemset(d_idata, 0, paddedSize * sizeof(int));
+                cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyHostToDevice);
+
+                int numThreads = paddedSize / 2;
+
                 kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
+
+                cudaFree(d_idata);
+                cudaFree(d_odata);
 
             } else {
                 int* d_data;
@@ -175,7 +175,6 @@ namespace StreamCompaction {
                 // For large arrays, use multiple kernel launches
                 int depth = ilog2ceil(paddedSize);
 
-                int* a = new int[0];
 
                 // Up-sweep phase
                 for (int level = 0; level < depth; level++) {
@@ -183,17 +182,11 @@ namespace StreamCompaction {
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
                     int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
                     kernUpSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
-					cudaDeviceSynchronize();
-                    cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
                 }
-
-                cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
 
 
                 // Set last element to 0 for exclusive scan
                 cudaMemset(d_data + paddedSize - 1, 0, sizeof(int));
-
-                cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
 
                 // Down-sweep phase
                 for (int level = depth - 1; level >= 0; level--) {
@@ -201,8 +194,6 @@ namespace StreamCompaction {
                     dim3 numBlocks((numActiveThreads + blockSize - 1) / blockSize);
                     int launchedBlockSize = numActiveThreads < blockSize ? numActiveThreads : blockSize;
                     kernDownSweep << <numBlocks, launchedBlockSize >> > (paddedSize, d_data, level);
-                    cudaDeviceSynchronize();
-                    cudaMemcpy(a, d_data + paddedSize - 1, sizeof(int), cudaMemcpyDeviceToHost);
                 }
 
 
@@ -211,8 +202,7 @@ namespace StreamCompaction {
                 cudaFree(d_data);
             }
 
-            cudaFree(d_idata);
-            cudaFree(d_odata);
+            
 
             timer().endGpuTimer();
         }
@@ -221,22 +211,24 @@ namespace StreamCompaction {
         void scanCompact(int n, int* odata, const int* idata) {
             // TODO
             int paddedSize = nextPowerOf2(n);
-
-            int* d_idata;
-            int* d_odata;
-            cudaMalloc((void**)&d_idata, paddedSize * sizeof(int));
-            cudaMalloc((void**)&d_odata, paddedSize * sizeof(int));
-
-            cudaMemset(d_idata, 0, paddedSize * sizeof(int));
-            cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
-            cudaDeviceSynchronize();
-
-			const int blockSize = 1024;
-            int numThreads = paddedSize / 2;
+			const int blockSize = 256;  
 
             if (paddedSize <= 2 * blockSize) {
+                int* d_idata;
+                int* d_odata;
+                cudaMalloc((void**)&d_idata, paddedSize * sizeof(int));
+                cudaMalloc((void**)&d_odata, paddedSize * sizeof(int));
+
+                cudaMemset(d_idata, 0, paddedSize * sizeof(int));
+                cudaMemcpy(d_idata, idata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+
+                int numThreads = paddedSize / 2;
+
                 kernEffScan << <1, numThreads, n * sizeof(int) >> > (d_odata, d_idata, paddedSize, nullptr);
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
+
+                cudaFree(d_idata);
+                cudaFree(d_odata);
             }
             else {
                 int* d_data;
@@ -270,12 +262,6 @@ namespace StreamCompaction {
                 cudaMemcpy(odata, d_data, n * sizeof(int), cudaMemcpyDeviceToDevice);
                 cudaFree(d_data);
             }
-
-            
-            cudaDeviceSynchronize();
-
-            cudaFree(d_idata);
-            cudaFree(d_odata);
 
         }
 

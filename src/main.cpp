@@ -7,6 +7,9 @@
  */
 
 #include <cstdio>
+#include <fstream>
+#include <iostream>
+#include <iomanip>
 #include <stream_compaction/cpu.h>
 #include <stream_compaction/naive.h>
 #include <stream_compaction/efficient.h>
@@ -14,7 +17,7 @@
 #include "testing_helpers.hpp"
 
  
-const int selectedDevice = 1; // Hardcode GPU selection
+const int selectedDevice = 0; // Hardcode GPU selection
 const int SIZE = 1 << 26; // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
@@ -100,14 +103,14 @@ int main(int argc, char* argv[]) {
     printDesc("work-efficient scan, power-of-two");
     StreamCompaction::Efficient::scan(SIZE, c, a);
     printElapsedTime(StreamCompaction::Efficient::timer().getGpuElapsedTimeForPreviousOperation(), "(CUDA Measured)");
-    printArray(SIZE, c, true);
+    //printArray(SIZE, c, true);
     printCmpResult(SIZE, b, c);
 
     zeroArray(SIZE, c);
     printDesc("work-efficient scan, non-power-of-two");
     StreamCompaction::Efficient::scan(NPOT, c, a);
     printElapsedTime(StreamCompaction::Efficient::timer().getGpuElapsedTimeForPreviousOperation(), "(CUDA Measured)");
-    printArray(NPOT, c, true);
+    //printArray(NPOT, c, true);
     printCmpResult(NPOT, b, c);
 
     zeroArray(SIZE, c);
@@ -176,6 +179,10 @@ int main(int argc, char* argv[]) {
     //printArray(count, c, true);
     printCmpLenResult(count, expectedNPOT, b, c);
 
+    delete[] a;
+    delete[] b;
+    delete[] c;
+
     // ========================================
     // CSV OUTPUT FOR PERFORMANCE GRAPHING
     // ========================================
@@ -184,10 +191,18 @@ int main(int argc, char* argv[]) {
     printf("CSV Performance Data (for graphing)\n");
     printf("========================================\n\n");
 
-    // Header
-    printf("Size,CPU_Scan,Naive_Scan,Efficient_Scan,Thrust_Scan,CPU_Compact,Efficient_Compact\n");
+    std::ofstream csvFile("results.csv");
+    if (!csvFile.is_open()) {
+        std::cerr << "Error: Could not open results.csv for writing!" << std::endl;
+        return -1;
+    }
 
-    for (int power = 20; power <= 19; power++) {
+    // Header
+    const char* header = "Size,CPU_Scan,Naive_Scan,Efficient_Scan,Thrust_Scan,CPU_Compact,Efficient_Compact";
+    printf("%s\n", header);
+    csvFile << header << std::endl;
+
+    for (int power = 21; power <= 29; power++) {
         int testSize = 1 << power;
 
         int* testA = new int[testSize];
@@ -223,16 +238,21 @@ int main(int argc, char* argv[]) {
         printf("%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
             testSize, t1, t2, t3, t4, t5, t6);
 
+        csvFile << testSize << "," << std::fixed << std::setprecision(3)
+            << t1 << "," << t2 << "," << t3 << "," << t4 << "," << t5 << "," << t6 << std::endl;
+
+
+
         delete[] testA;
         delete[] testB;
         delete[] testC;
     }
 
-    printf("\nCopy the CSV data above to create performance graphs\n");
+    csvFile.close();
+
+    printf("\nPerformance data saved to results.csv\n");
     printf("========================================\n\n");
 
     system("pause"); // stop Win32 console from closing on exit
-    delete[] a;
-    delete[] b;
-    delete[] c;
+    
 }

@@ -96,8 +96,12 @@ namespace StreamCompaction {
         __global__ void kernUpSweep(int n, int* data, int level) {
 			int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 			int stride = 1 << (level + 1);
-			int ai = stride * (index + 1) - 1;
 
+            //  Only process if this thread has work to do
+            int numActiveThreads = n / stride;
+            if (index >= numActiveThreads) return;
+
+			int ai = stride * (index + 1) - 1;
             if (ai < n) {
                 int bi = ai - (1 << level);
                 data[ai] += data[bi];
@@ -106,8 +110,12 @@ namespace StreamCompaction {
 
 		__global__ void kernDownSweep(int n, int* data, int level) {
 			int index = (blockIdx.x * blockDim.x) + threadIdx.x;
-
 			int stride = 1 << (level + 1);
+
+            //  Only process if this thread has work to do
+            int numActiveThreads = n / stride;
+            if (index >= numActiveThreads) return;
+
 			int ai = stride * (index + 1) - 1;
 
 			if (ai < n) {
@@ -119,7 +127,6 @@ namespace StreamCompaction {
 		}
 
 
-#define MUL 1
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
@@ -142,13 +149,12 @@ namespace StreamCompaction {
             int numThreads = paddedSize / 2;
 			
 
-            if (paddedSize <= 2048) {
+            if (paddedSize <= 2 * blockSize) {
                 
                 kernEffScan<<<1, numThreads, n * sizeof(int)>>>(d_odata, d_idata, paddedSize, nullptr);
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
 
             } else {
-#if MUL
                 int* d_data;
 
 				size_t bytes = paddedSize * sizeof(int);
@@ -203,43 +209,6 @@ namespace StreamCompaction {
                 // Copy result from device to host
                 cudaMemcpy(odata, d_data, bytes, cudaMemcpyDeviceToHost);
                 cudaFree(d_data);
-
-#else
-                dim3 numBlocks((paddedSize + 1023) / 1024);
-                const int m = paddedSize / 2048;
-                int* d_iblockSums;
-                cudaMalloc((void**)&d_iblockSums, m * sizeof(int));
-
-                for (int i = 0; i < n; i += 2048) {
-					kernEffScan << <1, 1024, 2048 * sizeof(int) >> > (d_odata + i, d_idata + i, 2048, d_iblockSums + i / 2048);
-                }
-
-				int* blockSums = new int[m];
-				cudaMemcpy(blockSums, d_iblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
-                int a = blockSums[1];
-
-				int* d_oblockSums;
-				cudaMalloc((void**)&d_oblockSums, m * sizeof(int));
-
-				kernEffScan << <1, m / 2, m * sizeof(int) >> > (d_oblockSums, d_iblockSums, m, nullptr);
-
-                int* blockSums1 = new int[m];
-                cudaMemcpy(blockSums1, d_oblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
-                int a1 = blockSums1[1];
-                a1 = blockSums1[2];
-
-                for (int i = 0; i < n; i += 2048) {
-					kernAddBlockSums << <1, 1024 >> > (2048, d_odata + i, blockSums1[i / 2048]);
-                }
-                
-                cudaMemcpy(d_idata, d_odata, paddedSize * sizeof(int), cudaMemcpyDeviceToDevice);
-				kernShiftRight << <numBlocks, 1024 >> > (paddedSize, d_odata, d_idata);
-
-				cudaFree(d_iblockSums);
-				cudaFree(d_oblockSums);
-
-                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToHost);
-#endif
             }
 
             cudaFree(d_idata);
@@ -265,12 +234,11 @@ namespace StreamCompaction {
 			const int blockSize = 1024;
             int numThreads = paddedSize / 2;
 
-            if (paddedSize <= 2048) {
+            if (paddedSize <= 2 * blockSize) {
                 kernEffScan << <1, numThreads, n * sizeof(int) >> > (d_odata, d_idata, paddedSize, nullptr);
                 cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
             }
             else {
-#if MUL
                 int* d_data;
                 cudaMalloc((void**)&d_data, paddedSize * sizeof(int));
                 cudaMemset(d_data, 0, paddedSize * sizeof(int));
@@ -301,41 +269,6 @@ namespace StreamCompaction {
                 // Copy to output
                 cudaMemcpy(odata, d_data, n * sizeof(int), cudaMemcpyDeviceToDevice);
                 cudaFree(d_data);
-#else
-                dim3 numBlocks((paddedSize + 1023) / 1024);
-                const int m = paddedSize / 2048;
-                int* d_iblockSums;
-                cudaMalloc((void**)&d_iblockSums, m * sizeof(int));
-
-                for (int i = 0; i < n; i += 2048) {
-                    kernEffScan << <1, 1024, 2048 * sizeof(int) >> > (d_odata + i, d_idata + i, 2048, d_iblockSums + i / 2048);
-                }
-
-                int* blockSums = new int[m];
-                cudaMemcpy(blockSums, d_iblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
-                int a = blockSums[1];
-
-                int* d_oblockSums;
-                cudaMalloc((void**)&d_oblockSums, m * sizeof(int));
-
-                kernEffScan << <1, m / 2, m * sizeof(int) >> > (d_oblockSums, d_iblockSums, m, nullptr);
-
-                int* blockSums1 = new int[m];
-                cudaMemcpy(blockSums1, d_oblockSums, m * sizeof(int), cudaMemcpyDeviceToHost);
-                int a1 = blockSums1[1];
-                a1 = blockSums1[2];
-
-                for (int i = 0; i < n; i += 2048) {
-                    kernAddBlockSums << <1, 1024 >> > (2048, d_odata + i, blockSums1[i / 2048]);
-                }
-
-                cudaMemcpy(d_idata, d_odata, paddedSize * sizeof(int), cudaMemcpyDeviceToDevice);
-                kernShiftRight << <numBlocks, 1024 >> > (paddedSize, d_odata, d_idata);
-
-                cudaFree(d_iblockSums);
-                cudaFree(d_oblockSums);
-                cudaMemcpy(odata, d_odata, n * sizeof(int), cudaMemcpyDeviceToDevice);
-#endif
             }
 
             
@@ -345,6 +278,8 @@ namespace StreamCompaction {
             cudaFree(d_odata);
 
         }
+
+
 
         /**
          * Performs stream compaction on idata, storing the result into odata.

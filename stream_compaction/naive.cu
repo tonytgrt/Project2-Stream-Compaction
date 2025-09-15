@@ -82,39 +82,10 @@ namespace StreamCompaction {
             if (n <= blockSize) {
                 kernNaiveScan << <fullBlocksPerGrid, blockSize >> > (n, ilog2ceil(n), d_odata, d_idata, nullptr);
             } else {
-// Toggle between Multiple kernal launches and block number kernel launches
-#define MUL 1
-
-#if MUL         // Multiple kernel launches, kernel launched for O(log n) times, each executes in O(1)
                 for (int d = 1; d <= ilog2ceil(n); d++) {
                     kernNaiveScanIteration << <fullBlocksPerGrid, blockSize >> > (n, d, d_odata, d_idata);
                     std::swap(d_idata, d_odata); // Swap pointers
                 }
-
-
-#else           // Block number kernel launches from slides, kernel launched for O(n) times, each executes in O(1)
-                const int m = n % blockSize == 0 ? n / blockSize : n / blockSize + 1;
-                int* d_iblockSums;
-                cudaMalloc((void**)&d_iblockSums, m * sizeof(int));
-
-                for (int i = 0; i < n; i += blockSize) {
-                    kernNaiveScan << <1, blockSize >> > (blockSize, ilog2ceil(blockSize), d_odata + i, d_idata + i, d_iblockSums + i / blockSize);
-                }
-
-                int* d_oblockSums;
-                cudaMalloc((void**)&d_oblockSums, m * sizeof(int));
-
-                kernNaiveScan << <1, blockSize >> > (m, ilog2ceil(m), d_oblockSums, d_iblockSums, nullptr);
-                kernNaiveScanShift << <1, blockSize >> > (m, d_oblockSums, d_oblockSums);
-
-
-                kernAddBlockSums << <fullBlocksPerGrid, blockSize >> > (n, d_odata, d_oblockSums);
-                kernAddBlockSums << <fullBlocksPerGrid, blockSize >> > (n, d_idata, d_oblockSums);
-                cudaDeviceSynchronize();
-
-                cudaFree(d_iblockSums);
-                cudaFree(d_oblockSums);
-#endif
             }
 
             kernNaiveScanShift << <fullBlocksPerGrid, blockSize >> > (n, d_odata, d_idata);

@@ -7,6 +7,8 @@ cis565_getting_started_generated_kernel*
 *.xcodeproj
 build
 *.ncu-rep
+*.csv
+*.xlsx
 
 # Created by https://www.gitignore.io/api/linux,osx,sublimetext,windows,jetbrains,vim,emacs,cmake,c++,cuda,visualstudio,webstorm,eclipse,xcode
 

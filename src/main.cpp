@@ -15,7 +15,7 @@
 
  
 const int selectedDevice = 1; // Hardcode GPU selection
-const int SIZE = 1 << 22; // feel free to change the size of array
+const int SIZE = 1 << 26; // feel free to change the size of array
 const int NPOT = SIZE - 3; // Non-Power-Of-Two
 int *a = new int[SIZE];
 int *b = new int[SIZE];

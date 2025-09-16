@@ -65,19 +65,23 @@ A detailed memory chart shows intensive device memory read/writes, while the L1 
 ![](/img/i-compute-naive-mem.png)
 
 #### 3.2 Efficient Scan
-In efficient scan there are two mirrored phases of upsweep and downsweep. I will analyze the upsweep performance here. Downsweep follows the same idea. See how Grid Size and Block Size exponentially decreases as we go deeper into the scan. This is what improves performance over the naive method.
+In efficient scan there are two mirrored phases of upsweep and downsweep. I will analyze the upsweep performance here. Downsweep follows the same idea. See how Grid Size and Block Size exponentially decreases as we proceed deeper into the scan. This critically improves performance over the naive method. H
 ![](/img/i-compute-ups-sum.png)
 
+Similarly, efficient scan is still bound by the memory throughput as with naive scan.
 ![](/img/i-compute-ups-detail.png)
 
+In memory chart, efficient scan hit the L1 Cache much more often than the naive scan with a 66.62% compared to previous 37.5%.
 ![](/img/i-compute-ups-mem.png)
 
 #### 3.3 Thrust
-
+As shown earlier, the thrust implementation of scan only has 3 kernel calls, a sharp contrast with the `log n` kernel calls I implemented. The scan kernel of thrust has a higher compute throughput than both of my implementation as well, which makes sense as it performs the best across all array sizes.
 ![](/img/i-compute-thrust-sum.png)
 
+Focusing on the details of DeviceScanKernel, thrust also appears to be bound by memory with its high memory throughput and low compute throughput, which alligns with scan algorithm's nature of simple array manipulations that requires low compute power but large memory bandwidth for large arrays.
 ![](/img/i-compute-thrust-detail.png)
 
+Quite noticably, thrust does not hit the L1 cache at all with a 0% hit rate. Instead, it utilizes shared memory as indicated with the 6.80M Inst in the graph below. This ensures its best performance across all implementations.
 ![](/img/i-compute-thrust-mem.png)
 
 ## Output

@@ -10,19 +10,75 @@ CUDA Stream Compaction
 ## Features
 
 ### 1. CPU Scan & Stream Compaction
+A simple for loop for the cpu scan. For cpu stream compaction, for loops are used for both scan and scatter. 
 
 ### 2. GPU Naive Scan
+Implemented a simple `kernNaiveScanIteration` kernel for the naive scan. Following the outline in parallel algorithms class slides, the kernel does simple array manipulation of:
+```
+  for all k in parallel
+    if (k >= 2d-1)
+      x[k] = x[k – 2d-1] + x[k];
+```
+Here `d` is the depth of the naive scan iterations, the for loop of `for d = 1 to log2n` is called from the scan function on the host to ensure proper synchronization across different blocks. 
 
 ### 3. GPU Efficient Scan & Stream Compaction
+There are two versions of my efficient scan. When array size `n <= blockSize`, a single kernel of `kernEffScan` is called only once from the host. It is an implementation migrated from the GPU Gems 3, Chapter 39 - [Parallel Prefix Sum (Scan) with CUDA](https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html) as provided to us in `INSTRUCTION.md`. As the article suggests, `kernEffScan` uses shared memory, and thus can only handle arrays within 1 block. It has the upsweep and downsweep phases combined within itself. When array size `n > blockSize`, upsweep and downsweep are seperated into `kernUpSweep` and `kernDownSweep`. These kernels are called multiple times in a for loop inside the host function, where each iteration reduces the number of active threads being invoked by the kernel to optimize performance. The two kernels uses global memory so that they can handle across blocks.  
+For Stream Compaction, two simple kernels of `kernMapToBoolean` and `kernScatter` are implemented along with a wrapper for the host scan function. The algorithm is very similar to its cpu counterpart only with parallel computation differing from the sequential for loops.
 
 ### 4. Thrust Invocation
+Calling the Thrust library for performance metrics comparison.
 
 ### 5. Extra Credits
 #### 5.1 Why is My GPU Approach So Slow?
+As seen in the Performance Analysis part below, my naive scan on gpu matches the cpu run time in smaller array sizes, and slightly outperforms the cpu in larger array sizes. Both efficient scan and efficient compaction outperforms the CPU, where efficient scan is very close to the Thrust scan in run time. 
 
 #### 5.2 Shared Memory (partly)
+Shared memory is used in Efficient scan and Efficient compact when array size `n <= blockSize`.
 
 ## Performance Analysis
+
+### 1. Optimal Blocksize
+`blockSize = 256` is found to be optimal for the scan and compact algorithms. In fact, the Thrust scan implementation also uses block size of 128, 256, and 384 as profiled in NSight Compute, suggesting that smaller `blockSize` is more suitable for the scan tasks.
+![](/img/i-compute-thrust-sum.png)
+
+### 2. Time Comparison
+
+#### 2.1 Scan
+Time cost comparison between scan implementations. 
+![](/img/i-scan-time.png)
+
+#### 2.2 Stream Compaction
+Time cost comparison between stream compaction implementations.
+![](/img/i-compact-time.png)
+
+### 3. Algorithm Performance Analysis in NSight Compute
+The program was profiled with array size `n = 1 << 26` in NSight Compute with data metrics set to full.
+
+#### 3.1 Naive Scan
+In Naive Scan, each kernel launch have the same block size since each time we are processing the entire array. 
+![](/img/i-compute-naive-sum.png)
+
+Throughput for naive scan shows a low SM thoughput and a high memory thoughput, indicating that we are bound by memory bandwidth and are under utilizing the compute power.
+![](/img/i-compute-naive-detail.png)
+
+A detailed memory chart shows intensive device memory read/writes, while the L1 Cache is only hit 37.5% of the time.
+![](/img/i-compute-naive-mem.png)
+
+#### 3.2 Efficient Scan
+In efficient scan there are two mirrored phases of upsweep and downsweep. I will analyze the upsweep performance here. Downsweep follows the same idea. See how Grid Size and Block Size exponentially decreases as we go deeper into the scan. This is what improves performance over the naive method.
+![](/img/i-compute-ups-sum.png)
+
+![](/img/i-compute-ups-detail.png)
+
+![](/img/i-compute-ups-mem.png)
+
+#### 3.3 Thrust
+
+![](/img/i-compute-thrust-sum.png)
+
+![](/img/i-compute-thrust-detail.png)
+
+![](/img/i-compute-thrust-mem.png)
 
 ## Output
 
@@ -114,4 +170,10 @@ Performance data saved to results.csv
 ========================================
 ```
 
-## Challenges and Thoughts
+## Anecdotes, Challenges, and Reflections
+
+### 1. Naive Scan 
+In a class I had a conversation with Mr. Mohammed about where the for loop of `for d = 1 to log2n` should be - is it called inside the kernel or from the host. Mr. Mohammed suggested it should be inside the kernel. In the same class I went on to implement the naive scan with for loop inside the kernel and the kernel being called only once from host. Then immediately I found it would not work when array size `n > blockSize`. I went on to discuss with Mr. Mohammed after class. He explained to me that since `__syncthreads()` will not work across different blocks, I should refer to the last few slides of the parallel algorithms to implement that method for larger array sizes to work. It took me a long time to implement the method discussed as `Scan on Arrays of Arbitrary Length` for the naive scan. Then when I tested it, the algorithm was surprisingly slow: often 10 times slower than the CPU for larger arrays. I found that this algorithm essentially takes `O(n)` to run as it divides the array into multiple subarrays of `blockSize`. Then I reflected back on my first discussion about the location of for loop, and came up with the current solution where I place the for loop in the host function, contrary to what Mr. Mohammed suggested. For larger arrays, by putting the for loop out and calling the kernel to each time perform a single parallel operation across multiple blocks, I can ensure the proper synchronization across blocks, while only invoking the kernel for `O(log n)` times, making the final run time of my naive scan implementation close to the CPU instead of the previous 10x worse. 
+
+### 2. Efficient Scan
+Story for efficient scan was similar. I first implemented a version using shared memory as outlined in the GPU Gems 3, Chapter 39 - [Parallel Prefix Sum (Scan) with CUDA](https://developer.nvidia.com/gpugems/GPUGems3/gpugems3_ch39.html), but can only handle array size for up to `n <= blockSize`. When I tried to find a solution for larger arrays, I first migrated the `Scan on Arrays of Arbitrary Length` again. It also gave me similarly bad performance, and lots of bugs like it would fail for `n > 1 << 24`. Then I went on to divide the `kernEffScan` that includes the upSweep and downSweep in one kernel to seperate kernels of `kernUpSweep` and `kernDownSweep`, and got the implementation we have.

@@ -202,7 +202,7 @@ int main(int argc, char* argv[]) {
     printf("%s\n", header);
     csvFile << header << std::endl;
 
-    for (int power = 21; power <= 29; power++) {
+    for (int power = 21; power <= 19; power++) {
         int testSize = 1 << power;
 
         int* testA = new int[testSize];
